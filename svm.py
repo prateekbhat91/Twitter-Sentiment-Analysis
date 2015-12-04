@@ -1,16 +1,36 @@
 from collections import defaultdict
 import nltk
+# nltk.download()
+from nltk.tokenize import word_tokenize as wt
+from nltk.probability import FreqDist as freq
 import numpy as np
 from numpy import array, arange, zeros, hstack, argsort
 from itertools import  izip
+import xlrd
+import codecs
+import sys
+from sklearn.cross_validation import StratifiedKFold
+from sklearn.grid_search import GridSearchCV
+from sklearn.svm import  SVC
+from sklearn.multiclass import OneVsOneClassifier, OneVsRestClassifier
+from sklearn.metrics import classification_report,confusion_matrix, accuracy_score
+
+
+n_jobs = 25
+
+book = xlrd.open_workbook('Final_tweets.xlsx')
+
+sheet = book.sheets()[0]
+
+
 
 class Tweet(object):
     def __init__(self,tweet):
-        self.id =
-        self.tweet =
-        self.tweetlocation =
-        self.geolocation =
-        self.label =
+        self.id = tweet['id']
+        self.tweet = tweet['tweet']
+        self.tweetlocation = tweet['tweet_location']
+        self.geolocation = tweet['geo_location']
+        self.label =tweet['label']
 
 class Candidate(object):
     def __init__(self,name):
@@ -21,17 +41,17 @@ class Candidate(object):
 
     def insertTweet(self,tweet):
         myobject = Tweet(tweet)
-        if tweet.label == "Positive":
+        if tweet['label'] == "positive":
             self.positive[len(self.positive)]= myobject
-        elif tweet.label == "Negative":
+        elif tweet['label'] == "negative":
             self.negative[len(self.negative)]= myobject
         else:
             self.neutral[len(self.neutral)] = myobject
 
     def getTweets(self,label):
-        if label == "Positive":
+        if label == "positive":
             data = self.positive
-        elif label == "Negative":
+        elif label == "negative":
             data = self.negative
         else:
             data = self.neutral
@@ -57,6 +77,45 @@ Marco= Candidate("Marco")
 CandidateList.append(Marco)
 Carley= Candidate("Carley")
 CandidateList.append(Carley)
+
+
+
+def get_data():
+    count = 1
+    total = 39692
+    sentiment = ['positive','negative','neutral']
+    for ind in range(1,total):
+        curr_tweet = defaultdict()
+        if sheet.row_values(ind)[5].lower() not in sentiment:
+            continue
+        curr_tweet['id']=sheet.row_values(ind)[0]
+        curr_tweet['candidate']=sheet.row_values(ind)[1]
+        curr_tweet['tweet']= "".join(sheet.row_values(ind)[2]).encode("utf-8")
+        curr_tweet['tweet_location']=sheet.row_values(ind)[3]
+        curr_tweet['geo_location']=sheet.row_values(ind)[4]
+        curr_tweet['label']=sheet.row_values(ind)[5].lower()
+
+        if curr_tweet['candidate'] == 'Hillary':
+            Hillary.insertTweet(curr_tweet)
+        elif curr_tweet['candidate'] == 'Bernie':
+            Bernie.insertTweet(curr_tweet)
+        elif curr_tweet['candidate'] == 'Trump':
+            Trump.insertTweet(curr_tweet)
+        elif curr_tweet['candidate'] == 'Ben':
+            Ben.insertTweet(curr_tweet)
+        elif curr_tweet['candidate'] == 'Martin':
+            Martin.insertTweet(curr_tweet)
+        elif curr_tweet['candidate'] == 'Marco':
+            Marco.insertTweet(curr_tweet)
+        else:
+            Carley.insertTweet(curr_tweet)
+
+get_data()
+
+
+
+
+
 
 def prepareData(CandidateList):
     positiveText = ""
@@ -88,39 +147,46 @@ def prepareData(CandidateList):
             neutralText += text
             vectors.append(vec)
             labels.append("neutral")
-    positiveTokens = nltk.word_tokenize(positiveText)
-    negativeTokens = nltk.word_tokenize(negativeText)
-    neutralTokens = nltk.word_tokenize(neutralText)
+    positiveTokens = wt(positiveText)
+    negativeTokens = wt(negativeText)
+    neutralTokens = wt(neutralText)
 
-    positiveDist = nltk.FreqDist(positiveTokens)
-    negativeDist = nltk.FreqDist(negativeTokens)
-    neutralDist = nltk.FreqDist(neutralTokens)
+    positiveDist = freq(positiveTokens)
+    negativeDist = freq(negativeTokens)
+    neutralDist = freq(neutralTokens)
 
-    tempVector = {}
+    tempVector = defaultdict()
 
-    mostCount = 50
+    mostCount = 30
     mostPositive = positiveDist.most_common(mostCount)
     mostNegative = negativeDist.most_common(mostCount)
     mostNeutral = neutralDist.most_common(mostCount)
 
-    for mytuple in positiveDist:
-        if mytuple not in mostPositive and mytuple[1] > 4:
+
+
+
+    for mytuple in positiveDist.items():
+        if mytuple not in mostPositive and mytuple[1] > 1:
             tempVector[len(tempVector)] = mytuple[0]
-    for mytuple in negativeDist:
-        if mytuple not in mostNegative and mytuple[1] > 4:
+    for mytuple in negativeDist.items():
+        if mytuple not in mostNegative and mytuple[1] > 1:
             tempVector[len(tempVector)] = mytuple[0]
-    for mytuple in neutralDist:
-        if mytuple not in mostNeutral and mytuple[1] > 4:
+    for mytuple in neutralDist.items():
+        if mytuple not in mostNeutral and mytuple[1] > 1:
             tempVector[len(tempVector)] = mytuple[0]
 
+    print len(tempVector)
     tempvector = {tempVector[w]: w for w in tempVector}
+    print len(tempvector)
     return (vectors,labels,tempvector)
+
+(vectors,labels,temp)=prepareData(CandidateList)
 
 def svmVector(vectors,labels,svmvector):
     trainvector = []
     trainlabel = []
     for (data,label) in izip(vectors,labels):
-        vec = np.zeroes((len(svmvector)))
+        vec = np.zeros((len(svmvector)))
         for word in data:
             try:
                 vec[svmvector[word]] = 1
@@ -133,6 +199,8 @@ def svmVector(vectors,labels,svmvector):
     sklabels = array(trainlabel)
 
     return skvectors, sklabels
+
+(skvector, sklabel)=svmVector(vectors,labels,temp)
 
 def SVM_gridSearch(trainVectors, trainLabels, kernel):
     C_range = 10.0 ** arange(-2, 2)
@@ -154,7 +222,13 @@ def getCAndGamma(skvectors, sklabels, kernel = 'rbf'):
     print gamma
     return C, gamma
 
+C,gamma = getCAndGamma(skvector,sklabel)
+clf = OneVsRestClassifier(SVC(C=C, kernel='linear', gamma= gamma,verbose= False, probability= False))
+testvector = skvector
+clf.fit(skvector,sklabel)
+predicted = clf.predict(testvector)
 
-
+print "classification reports: ", classification_report(sklabel,predicted)
+print "Accuracy score: ", round(accuracy_score(sklabel,predicted),2)
 
 
